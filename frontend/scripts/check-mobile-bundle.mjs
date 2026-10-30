@@ -18,7 +18,6 @@ import { fileURLToPath } from 'node:url'
 const COPIES = [
   'dist',
   'android/app/src/main/assets/public',
-  'ios/App/App/public',
 ]
 
 export function checkCopy(dir) {
