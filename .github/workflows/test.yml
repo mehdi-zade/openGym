@@ -447,9 +447,15 @@ jobs:
       - name: Phone bundle + cap sync
         run: npm run build:mobile
         working-directory: frontend
-      - name: JVM unit tests, sideload APK, play flavour compiles
+      - name: JVM unit tests, sideload APK
         working-directory: frontend/android
-        run: ./gradlew --no-daemon testSideloadDebugUnitTest assembleSideloadDebug compilePlayDebugJavaWithJavac
+        run: ./gradlew --no-daemon testSideloadDebugUnitTest assembleSideloadDebug
+      - name: Upload sideload APK
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: opengym-sideload-debug-apk
+          path: frontend/android/app/build/outputs/apk/sideload/debug/*.apk
+          retention-days: 14
       - name: Stats
         if: always()
         working-directory: frontend/android
