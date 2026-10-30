@@ -25,6 +25,7 @@ import { speedUnitOf } from '../lib/speed.js'
 import { POLICIES_FOR, POLICY_NAME, POLICY_DESC } from '../lib/progression.js'
 import BodyMap from '../components/BodyMap.jsx'
 import { loadOfRoutine, rankOf, MUSCLE_NAME } from '../lib/muscles.js'
+import { WARMUP_OPTIONS, WARMUP_PROTOCOLS } from '../lib/warmup-protocols.js'
 
 export const ROUTINE_LONG_PRESS_MS = 380
 export const ROUTINE_DRAG_SLOP = 8
@@ -477,6 +478,17 @@ export default function RoutineEdit() {
       <SelectRow icon="chartLine" title={t('Progression')} sheetTitle={t('Progression')}
         value={r.prog || 'linear'} onChange={v => update(s => { s.routines.find(x => x.id === id).prog = v })}
         options={POLICIES_FOR.reps.map(p => ({ value: p, label: t(POLICY_NAME[p]), subtitle: t(POLICY_DESC[p]) }))} />
+      <SelectRow icon="heartPulse" title={t('Pre-workout mobility')} sheetTitle={t('Pre-workout mobility')}
+        value={r.warmupProtocol || ''} onChange={v => update(s => {
+          const routine = s.routines.find(x => x.id === id)
+          if (v) routine.warmupProtocol = v
+          else delete routine.warmupProtocol
+        })}
+        options={WARMUP_OPTIONS.map(opt => ({
+          value: opt.value,
+          label: t(opt.label),
+          subtitle: opt.value ? t(WARMUP_PROTOCOLS[opt.value]?.description) : undefined
+        }))} />
       {/* Two controls that read alike and are not (issue #294). Progression picks how this
           routine's own targets move, and "No automatic progression" keeps them where they are.
           This switch decides whether the routine's workouts count at all: a deload routine's

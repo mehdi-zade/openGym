@@ -80,6 +80,11 @@ function Prescription({ entry, setIdx, unit, fallbackRest, children }) {
   return <div className="focus-prescription">
     <span className="focus-badge focus-progress">{setIdx + 1}/{entry.sets.length}</span>
     {badges.map(label => <span className="focus-badge" key={label}>{label}</span>)}
+    {(entry.target?.prog === 'er' || entry.plan?.policy === 'er') && (
+      <span className="focus-badge" style={{ borderColor: 'var(--acc)', color: 'var(--acc)' }}>
+        <Icon name="bolt" /> {Number(entry.target?.erTargetReps) || 20} ERs (≤{Number(entry.target?.erMaxClusters) || 3} bursts)
+      </span>
+    )}
     {children}
   </div>
 }

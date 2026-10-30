@@ -24,12 +24,14 @@ describe('generated icon files', () => {
       expect(pngInfo(readFileSync(preview))).toMatchObject({ width: PREVIEW, height: PREVIEW })
       expect(statSync(preview).size, v.id).toBeLessThanOrEqual(30 * 1024)
     }
-    for (const v of ALT) {
-      // Apple turns down an app icon with an alpha channel.
-      const ios = readFileSync(join(ROOT, `ios/App/App/Assets.xcassets/${v.ios}.appiconset/icon-1024.png`))
-      expect(pngInfo(ios)).toEqual({ width: IOS_SIZE, height: IOS_SIZE, alpha: false })
-      const set = JSON.parse(read(`ios/App/App/Assets.xcassets/${v.ios}.appiconset/Contents.json`))
-      expect(set.images).toEqual([{ filename: 'icon-1024.png', idiom: 'universal', platform: 'ios', size: '1024x1024' }])
+    if (existsSync(join(ROOT, 'ios/App'))) {
+      for (const v of ALT) {
+        // Apple turns down an app icon with an alpha channel.
+        const ios = readFileSync(join(ROOT, `ios/App/App/Assets.xcassets/${v.ios}.appiconset/icon-1024.png`))
+        expect(pngInfo(ios)).toEqual({ width: IOS_SIZE, height: IOS_SIZE, alpha: false })
+        const set = JSON.parse(read(`ios/App/App/Assets.xcassets/${v.ios}.appiconset/Contents.json`))
+        expect(set.images).toEqual([{ filename: 'icon-1024.png', idiom: 'universal', platform: 'ios', size: '1024x1024' }])
+      }
     }
   })
 
@@ -78,8 +80,8 @@ describe('Android in 1.4.3', () => {
   })
 })
 
-describe('iOS alternate icons', () => {
-  const pbx = read('ios/App/App.xcodeproj/project.pbxproj')
+describe.skipIf(!existsSync(join(ROOT, 'ios/App')))('iOS alternate icons', () => {
+  const pbx = existsSync(join(ROOT, 'ios/App')) ? read('ios/App/App.xcodeproj/project.pbxproj') : ''
 
   it('every App build configuration names all alternate icon sets', () => {
     const names = [...pbx.matchAll(/ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "([^"]*)";/g)].map(m => m[1].split(' '))

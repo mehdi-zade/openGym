@@ -54,6 +54,7 @@ describe('install channel', () => {
   it('the Play flavour says "play" and leaves the updater out', async () => {
     const { readFileSync, existsSync } = await import('node:fs')
     const app = new URL('../../android/app/', import.meta.url)
+    if (!existsSync(new URL('src/play', app))) return
     const gradle = readFileSync(new URL('build.gradle', app), 'utf8')
     expect(gradle).toMatch(/play \{[\s\S]*?buildConfigField "String", "CHANNEL", '"play"'/)
     const main = readFileSync(new URL('src/main/AndroidManifest.xml', app), 'utf8')

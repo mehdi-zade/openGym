@@ -1140,3 +1140,163 @@ describe('a weight off the increment grid keeps its offset when it goes up (issu
     expect(p.weight).toBe(62.5)
   })
 })
+
+describe('Effective Reps (ER) density progression', () => {
+  const erTarget = { sets: 1, reps: 10, prog: 'er', erTargetReps: 20, erMaxClusters: 3 }
+
+  it('evaluates graduation when target effective reps are accumulated in <= 3 micro-sets', () => {
+    const session = readSession({
+      id: LIFT,
+      target: erTarget,
+      sets: [
+        { phase: 'warmup', w: 40, r: 10, done: true },
+        { type: 'restpause', w: 40, r: 20, done: true, clusters: [{ r: 8, restSec: 15 }, { r: 7, restSec: 15 }, { r: 5, restSec: 15 }] }
+      ]
+    })
+    expect(session.ok).toBe(true)
+    expect(session.erGraduated).toBe(true)
+    expect(session.erClusterCount).toBe(3)
+    expect(session.erTotalReps).toBe(20)
+  })
+
+  it('evaluates density challenge (hold weight) when target reps take > 3 micro-sets', () => {
+    const session = readSession({
+      id: LIFT,
+      target: erTarget,
+      sets: [
+        { phase: 'warmup', w: 40, r: 10, done: true },
+        { type: 'restpause', w: 40, r: 20, done: true, clusters: [{ r: 5, restSec: 15 }, { r: 4, restSec: 15 }, { r: 4, restSec: 15 }, { r: 4, restSec: 15 }, { r: 3, restSec: 15 }] }
+      ]
+    })
+    expect(session.ok).toBe(true)
+    expect(session.erGraduated).toBe(false)
+    expect(session.erClusterCount).toBe(5)
+    expect(session.erTotalReps).toBe(20)
+  })
+
+  it('evaluates miss when total accumulated reps are short of target reps', () => {
+    const session = readSession({
+      id: LIFT,
+      target: erTarget,
+      sets: [
+        { phase: 'warmup', w: 40, r: 10, done: true },
+        { type: 'restpause', w: 40, r: 15, done: true, clusters: [{ r: 5, restSec: 15 }, { r: 4, restSec: 15 }, { r: 3, restSec: 15 }, { r: 3, restSec: 15 }] }
+      ]
+    })
+    expect(session.ok).toBe(false)
+    expect(session.erGraduated).toBe(false)
+    expect(session.erTotalReps).toBe(15)
+  })
+
+  it('graduates and increases weight by increment after <= 3 micro-sets', () => {
+    const S = {
+      unit: 'kg',
+      workouts: [{
+        d: '2026-03-01',
+        entries: [{
+          id: LIFT,
+          target: { weight: 40, prog: 'er', erTargetReps: 20, erMaxClusters: 3, inc: 2.5 },
+          sets: [
+            { phase: 'warmup', w: 40, r: 10, done: true },
+            { type: 'restpause', w: 40, r: 20, done: true, clusters: [{ r: 8, restSec: 15 }, { r: 7, restSec: 15 }, { r: 5, restSec: 15 }] }
+          ]
+        }]
+      }]
+    }
+    const p = nextPrescription(S, { id: LIFT, prog: 'er', erTargetReps: 20, erMaxClusters: 3, inc: 2.5 })
+    expect(p.kind).toBe('up')
+    expect(p.weight).toBe(42.5)
+    expect(p.why[0]).toContain('Accumulated {0} reps in {1} bursts')
+  })
+
+  it('holds weight to improve density when target reps took > 3 micro-sets', () => {
+    const S = {
+      unit: 'kg',
+      workouts: [{
+        d: '2026-03-01',
+        entries: [{
+          id: LIFT,
+          target: { weight: 40, prog: 'er', erTargetReps: 20, erMaxClusters: 3, inc: 2.5 },
+          sets: [
+            { phase: 'warmup', w: 40, r: 10, done: true },
+            { type: 'restpause', w: 40, r: 20, done: true, clusters: [{ r: 5, restSec: 15 }, { r: 4, restSec: 15 }, { r: 4, restSec: 15 }, { r: 4, restSec: 15 }, { r: 3, restSec: 15 }] }
+          ]
+        }]
+      }]
+    }
+    const p = nextPrescription(S, { id: LIFT, prog: 'er', erTargetReps: 20, erMaxClusters: 3, inc: 2.5 })
+    expect(p.kind).toBe('hold')
+    expect(p.weight).toBe(40)
+    expect(p.why[0]).toContain('Condense into {2} bursts or fewer')
+  })
+
+  it('holds weight on single miss of target reps', () => {
+    const S = {
+      unit: 'kg',
+      workouts: [{
+        d: '2026-03-01',
+        entries: [{
+          id: LIFT,
+          target: { weight: 40, prog: 'er', erTargetReps: 20, erMaxClusters: 3, inc: 2.5 },
+          sets: [
+            { phase: 'warmup', w: 40, r: 10, done: true },
+            { type: 'restpause', w: 40, r: 14, done: true, clusters: [{ r: 6, restSec: 15 }, { r: 4, restSec: 15 }, { r: 4, restSec: 15 }] }
+          ]
+        }]
+      }]
+    }
+    const p = nextPrescription(S, { id: LIFT, prog: 'er', erTargetReps: 20, erMaxClusters: 3, inc: 2.5 })
+    expect(p.kind).toBe('hold')
+    expect(p.weight).toBe(40)
+    expect(p.why[0]).toContain('Accumulated {0} of {1} reps')
+  })
+
+  it('deloads after 3 consecutive sessions missing target reps', () => {
+    const S = {
+      unit: 'kg',
+      workouts: [1, 2, 3].map(day => ({
+        d: `2026-03-0${day}`,
+        entries: [{
+          id: LIFT,
+          target: { weight: 40, prog: 'er', erTargetReps: 20, erMaxClusters: 3, inc: 2.5 },
+          sets: [
+            { phase: 'warmup', w: 40, r: 10, done: true },
+            { type: 'restpause', w: 40, r: 12, done: true, clusters: [{ r: 6, restSec: 15 }, { r: 3, restSec: 15 }, { r: 3, restSec: 15 }] }
+          ]
+        }]
+      }))
+    }
+    const p = nextPrescription(S, { id: LIFT, prog: 'er', erTargetReps: 20, erMaxClusters: 3, inc: 2.5 })
+    expect(p.kind).toBe('deload')
+    expect(p.weight).toBeLessThan(40)
+    expect(p.why[0]).toContain('Short of {0} reps {1} sessions running')
+  })
+
+  it('supports unilateral (per side) Effective Reps accumulation', () => {
+    const S = {
+      unit: 'kg',
+      workouts: [{
+        d: '2026-03-01',
+        entries: [{
+          id: LIFT,
+          target: { weight: 20, prog: 'er', side: true, erTargetReps: 20, erMaxClusters: 3, inc: 2.5 },
+          sets: [
+            {
+              phase: 'work',
+              w: 20,
+              r: 20,
+              done: true,
+              sides: {
+                L: { w: 20, r: 10, done: true, type: 'restpause', clusters: [{ r: 4, restSec: 15 }, { r: 3, restSec: 15 }, { r: 3, restSec: 15 }] },
+                R: { w: 20, r: 10, done: true, type: 'restpause', clusters: [{ r: 4, restSec: 15 }, { r: 3, restSec: 15 }, { r: 3, restSec: 15 }] }
+              }
+            }
+          ]
+        }]
+      }]
+    }
+    const p = nextPrescription(S, { id: LIFT, prog: 'er', side: true, erTargetReps: 20, erMaxClusters: 3, inc: 2.5 })
+    expect(p.kind).toBe('up')
+    expect(p.weight).toBe(22.5)
+  })
+})

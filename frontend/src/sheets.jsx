@@ -1796,6 +1796,11 @@ function ProgressionFields({ ex, mode, c, setC, routine, unit, perSide, bw }) {
     // to failure" on too, unless it was already decided. Only the sheet's draft: nothing is
     // written until Save, and a plan saved before stays what it was.
     if (v === 'greyskull' && next.lastToFailure == null) next.lastToFailure = true
+    if (v === 'er') {
+      next.erTargetReps = next.erTargetReps || 20
+      next.erMaxClusters = next.erMaxClusters || 3
+      next.intensifier = { type: 'restpause', totalReps: next.erTargetReps || 20, restSec: next.intensifier?.restSec || 15 }
+    }
     const picked = policyFor({ ...next, id: ex.id }, routine, mode)
     // Triple progression opens with room for two more sets, the usual 3 to 5.
     if (picked === 'triple' && !(next.setsMax > 0)) next.setsMax = Math.min(MAX_TRIPLE_SETS, Math.max(1, Math.round(next.sets) || 1) + 2)
@@ -1814,7 +1819,7 @@ function ProgressionFields({ ex, mode, c, setC, routine, unit, perSide, bw }) {
     {/* Double progression on a weighted exercise fills this row with four steppers; `cfgrow-4`
         lets it wrap into two pairs on phones, where four abreast left the inputs a few px wide. */}
     {weightless && active !== 'off' && <div className="small dim" style={{ marginBottom: 12 }}>{t('Nothing to add in weight here: it goes up in reps, then sets.')}</div>}
-    {(active !== 'off' || backoff) && (!weightless || climbsRange(active) || active === 'triple') && <div className={'row cfgrow' + ((active === 'double' && epleyEligible) || active === 'triple' ? ' cfgrow-4' : '')} style={{ marginBottom: 18 }}>
+    {(active !== 'off' || backoff) && (!weightless || climbsRange(active) || active === 'triple' || active === 'er') && <div className={'row cfgrow' + ((active === 'double' && epleyEligible) || active === 'triple' || active === 'er' ? ' cfgrow-4' : '')} style={{ marginBottom: 18 }}>
       {!weightless && <Stepper label={mode === 'time' ? t('Step (seconds)') : t('Step ({0})', unit)} value={inc}
         step={mode === 'time' ? 5 : 1.25} decimal={mode !== 'time'} invalid={invalid} className={invalid ? 'invalid' : ''}
         onChange={v => setC(x => ({ ...x, inc: v }))} />}
@@ -1829,6 +1834,12 @@ function ProgressionFields({ ex, mode, c, setC, routine, unit, perSide, bw }) {
       {/* Where triple progression stops adding sets; the Sets above are where it starts. */}
       {active === 'triple' && <Stepper label={t('Sets up to')} value={c.setsMax ?? setsMaxOf(c)} step={1} decimal={false}
         onChange={v => setC(x => ({ ...x, setsMax: v }))} />}
+      {active === 'er' && <>
+        <Stepper label={t('Target ERs')} value={c.erTargetReps ?? 20} step={stride} min={1} decimal={false}
+          onChange={v => setC(x => ({ ...x, erTargetReps: v, intensifier: x.intensifier?.type === 'restpause' ? { ...x.intensifier, totalReps: v } : x.intensifier }))} />
+        <Stepper label={t('Graduation bursts (≤)')} value={c.erMaxClusters ?? 3} step={1} min={1} max={10} decimal={false}
+          onChange={v => setC(x => ({ ...x, erMaxClusters: v }))} />
+      </>}
       {epleyEligible && <Stepper label={t('Deload 1RM (%)')} value={deloadPercent} step={5} min={50} max={95} decimal={false}
         onChange={v => setC(x => ({ ...x, deloadFactor: Number(v) / 100 }))} />}
     </div>}
@@ -3120,6 +3131,7 @@ export function startFlow(routineIds) {
 export function beginWorkout(routineIds, bw, { id = null, start = null } = {}) {
   const st = S()
   const { entries, routineIds: rids, routines } = buildCombinedEntries(st, routineIds)
+  const warmupProtocol = routines.find(r => r.warmupProtocol)?.warmupProtocol || null
   const startAt = Number.isFinite(start) && start > 0 ? start : Date.now()
   update(s => {
     s.active = {
@@ -3129,6 +3141,9 @@ export function beginWorkout(routineIds, bw, { id = null, start = null } = {}) {
       routineIds: rids,
       name: routines.length ? deriveSessionName(routines.map(r => r.name)) : t('Freestyle'),
       bw: bw || null, cur: 0, entries,
+      warmupProtocol,
+      warmupStepsDone: [],
+      warmupDone: false,
       // Snapshot the layout at start so the header ⋮ can change it for this session only —
       // changing the saved default (Settings → Workout view) mid-session leaves it alone.
       workoutView: st.workoutView || 'cards',

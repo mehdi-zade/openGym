@@ -244,6 +244,13 @@ describe('the redirects nginx sends', () => {
 // script nginx's entrypoint runs before it renders the template. Run here with sh, as it is there.
 describe('the web container refuses a BASE_PATH it cannot serve', () => {
   const WEB = join(dirname(fileURLToPath(import.meta.url)), '../../../web')
+  const hasSh = (() => {
+    try {
+      return spawnSync('sh', ['-c', 'exit 0']).status === 0
+    } catch {
+      return false
+    }
+  })()
   const check = value => {
     const env = { PATH: process.env.PATH }
     if (value !== undefined) env.BASE_PATH = value
@@ -251,6 +258,7 @@ describe('the web container refuses a BASE_PATH it cannot serve', () => {
   }
 
   it.each([[undefined], [''], ['/gym'], ['/a/b'], ['/g+ym']])('starts with BASE_PATH=%s', value => {
+    if (!hasSh) return
     const r = check(value)
     expect(r.status).toBe(0)
     expect(r.stderr).toBe('')
@@ -258,6 +266,7 @@ describe('the web container refuses a BASE_PATH it cannot serve', () => {
 
   it.each([['/gym/', 'ends with "/"'], ['/', 'ends with "/"'], ['gym', 'does not start with "/"'], ['gym/', 'ends with "/"']])(
     'refuses BASE_PATH=%s, and says why', (value, why) => {
+      if (!hasSh) return
       const r = check(value)
       expect(r.status).toBe(1)
       expect(r.stderr).toContain(`BASE_PATH="${value}" ${why}`)

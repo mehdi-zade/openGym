@@ -176,7 +176,7 @@ export function setLabel(id, s, cfg, speedUnit) {
   // the extra reps belong to is not known, so such a set reads as its plain total. The target
   // says whether the exercise plans rest-pause; a row added to it and given bursts live can only
   // be told apart by that, and reads as its plain total too, which is still what was lifted.
-  const planned = c.intensifier?.type === 'restpause'
+  const planned = c.intensifier?.type === 'restpause' || c.prog === 'er'
   const repsOf = side => {
     const reps = side.r || 0
     const bursts = clustersOf(side).map(b => Number(b?.r) || 0).filter(r => r > 0)
@@ -731,8 +731,8 @@ function shapeRows(sets, cfg, grid) {
   // the bursts are the full breakdown of that same total, down to the last one. See
   // extraVolumeOf/setTonnage: a rest-pause row's `clusters` are read-only display of how `r`
   // breaks down, not extra volume on top of it, precisely so this doesn't double-count.
-  const restSec = Math.max(5, cfg.intensifier.restSec || 15)
-  const totalReps = Math.max(1, Math.round(cfg.intensifier.totalReps) || 1)
+  const restSec = Math.max(5, cfg?.intensifier?.restSec || 15)
+  const totalReps = Math.max(1, Math.round(cfg?.erTargetReps || cfg?.intensifier?.totalReps) || (cfg?.prog === 'er' ? 20 : 1))
   const w = (sets.find(s => !isWarmupRow(s)) || sets[0] || {}).w || 0
   const warmup = { w, r: Math.max(1, Math.round(cfg.reps) || 1), done: false, phase: 'warmup' }
   const work = { w, r: totalReps, done: false, type: 'restpause', clusters: splitBurstReps(totalReps).map(r => ({ r, restSec })) }

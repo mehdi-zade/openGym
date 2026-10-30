@@ -234,9 +234,11 @@ export function files(rects = glyph()) {
     out.push([`public/app-icons/${v.id}.png`, () => draw(v, PREVIEW, { rects })])
     if (v.id === 'default') continue
     if (!v.art) out.push([`resources/icons/${v.id}.svg`, () => svgOf(v, rects)])
-    const set = `ios/App/App/Assets.xcassets/${v.ios}.appiconset`
-    out.push([`${set}/Contents.json`, () => iosContents])
-    out.push([`${set}/icon-1024.png`, () => draw(v, IOS_SIZE, { rects })])
+    if (existsSync(join(ROOT, 'ios/App'))) {
+      const set = `ios/App/App/Assets.xcassets/${v.ios}.appiconset`
+      out.push([`${set}/Contents.json`, () => iosContents])
+      out.push([`${set}/icon-1024.png`, () => draw(v, IOS_SIZE, { rects })])
+    }
   }
   return out
 }

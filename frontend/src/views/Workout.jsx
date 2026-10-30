@@ -48,6 +48,8 @@ import { canMoveActiveWorkoutUnit, moveActiveWorkoutUnit, canMoveActiveWorkoutEn
 import { nextOpenSet, workoutKeyAction } from '../lib/workout-keys.js'
 import { MUSCLE_NAME } from '../lib/muscles.js'
 import FocusView from './FocusView.jsx'
+import WarmupProtocolBanner from '../components/WarmupProtocolBanner.jsx'
+import { getWarmupProtocol, WARMUP_OPTIONS, WARMUP_PROTOCOLS } from '../lib/warmup-protocols.js'
 import { SeasonDeco } from '../components/Seasonal.jsx'
 import { entryDbLoad, bellsIn, ownedWeightsFor, stepOwned } from '../lib/dumbbells.js'
 
@@ -732,6 +734,21 @@ function ExerciseBlock({ entryIdx, compact, dense, editing, onToggle, onToggleSi
     </div>}
     {entry.note && <div className="exnote">{entry.note}</div>}
     {planLine}
+    {(entry.target?.prog === 'er' || entry.plan?.policy === 'er') && (() => {
+      const workSet = entry.sets.find(s => !isWarmupRow(s))
+      if (!workSet) return null
+      const clusters = isSideSet(workSet) ? clustersOf(workSet.sides?.L) : clustersOf(workSet)
+      const count = clusters.filter(c => (Number(c.r) || 0) > 0).length
+      const total = isSideSet(workSet)
+        ? (Number(workSet.sides?.L?.r) || 0) + (Number(workSet.sides?.R?.r) || 0)
+        : (Number(workSet.r) || 0)
+      const target = Number(entry.target?.erTargetReps) || Number(entry.target?.intensifier?.totalReps) || 20
+      const maxClusters = Number(entry.target?.erMaxClusters) || 3
+      return <div className="small dim planline" style={{ marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Icon name="bolt" style={{ color: 'var(--acc)', fontSize: 13 }} />
+        <span>{t('Effective Reps: {0} / {1} accumulated ({2} burst{3}, target: ≤{4})', total, target, count, count === 1 ? '' : 's', maxClusters)}</span>
+      </div>
+    })()}
     {refLine}
     {guidance && onProgressionSettings && <button type="button" className={'progline' + (plan.kind === 'deload' ? ' warn' : '')}
       aria-label={t('Open exercise settings')} onClick={onProgressionSettings}>
@@ -985,6 +1002,29 @@ function ActiveWorkout() {
   const readyRestEnds = useUI(s => (s.timer?.ready ? s.timer.endsAt : undefined))
   const A = S.active
   const editing = !!A.editingWorkoutId
+  const warmupProtocol = getWarmupProtocol(A.warmupProtocol)
+  const toggleWarmupStep = stepId => {
+    update(s => {
+      if (!s.active) return
+      const current = s.active.warmupStepsDone || []
+      s.active.warmupStepsDone = current.includes(stepId)
+        ? current.filter(id => id !== stepId)
+        : [...current, stepId]
+    })
+  }
+  const completeWarmup = () => {
+    update(s => {
+      if (!s.active) return
+      s.active.warmupDone = true
+    })
+  }
+  const resetWarmup = () => {
+    update(s => {
+      if (!s.active) return
+      s.active.warmupDone = false
+      s.active.warmupStepsDone = []
+    })
+  }
   // A past workout has no rest to time — the sets were done days ago. The work timer for
   // timed sets stays, since counting a hold is how its duration gets entered.
   const startRest = (A.backfill || editing) ? () => {} : liveRest
@@ -1570,6 +1610,22 @@ function ActiveWorkout() {
   // throws the session away: that is the Finish sheet's (#751).
   // Layout here stays this session's own (s.active.workoutView); the settings sheet's Layout is
   // the saved one.
+  const openWarmupMenu = () => menuSheet({
+    title: t('Pre-workout mobility'),
+    sections: [{
+      items: WARMUP_OPTIONS.map(opt => ({
+        label: t(opt.label),
+        sub: opt.value ? t(WARMUP_PROTOCOLS[opt.value]?.description) : undefined,
+        on: (A.warmupProtocol || '') === opt.value,
+        onClick: () => update(s => {
+          if (!s.active) return
+          s.active.warmupProtocol = opt.value || null
+          s.active.warmupDone = false
+          s.active.warmupStepsDone = []
+        })
+      }))
+    }]
+  })
   const openViewMenu = () => menuSheet({
     sections: [
       { items: [
@@ -1583,6 +1639,7 @@ function ActiveWorkout() {
       ] },
       { title: t('This workout'), items: [
         A.backfill && A.entries.length > 0 && { icon: 'checkCircle', label: t('Mark all sets done'), onClick: markAllDone },
+        warmupProtocol && { icon: 'heartPulse', label: t('Pre-workout mobility'), sub: t(warmupProtocol.name), onClick: openWarmupMenu },
         { icon: 'pencil', label: t('Rename workout'), onClick: renameWorkoutSheet },
         { icon: 'layout', label: t('Layout'), sub: LAYOUT_LABEL[workoutView] || LAYOUT_LABEL.cards, onClick: openLayoutMenu },
         { icon: 'note', label: A.note ? t('Edit session note') : t('Add session note'), onClick: sessionNoteSheet },
@@ -2179,6 +2236,16 @@ function ActiveWorkout() {
     </div>
     {editing && <p className="muted small">{t('Editing a saved workout. Date and duration stay unchanged.')}</p>}
     {A.backfill && <div className="muted small" style={{ marginBottom: 8 }}>{t('Logging a past workout, so no rest timers.')}</div>}
+    {warmupProtocol && (
+      <WarmupProtocolBanner
+        protocol={warmupProtocol}
+        stepsDone={A.warmupStepsDone || []}
+        isDone={A.warmupDone === true}
+        onToggleStep={toggleWarmupStep}
+        onComplete={completeWarmup}
+        onReset={resetWarmup}
+      />
+    )}
 
     {A.entries.length ? (listMode ? (
       <div className="workout-list" data-testid="workout-list" ref={listRef}>

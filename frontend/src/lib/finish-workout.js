@@ -124,6 +124,7 @@ export function buildCompletedWorkout(active, { end = Date.now(), prs = [], snap
     bw: active.bw,
     entries,
     prs,
+    ...(active.warmupProtocol ? { warmupProtocol: active.warmupProtocol, warmupDone: active.warmupDone === true } : {}),
     ...(allNoProg ? { excludeFromProgression: true } : {}),
     ...(sessionNote ? { note: sessionNote } : {}),
   }

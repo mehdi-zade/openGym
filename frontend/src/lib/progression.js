@@ -18,17 +18,17 @@
 
 import { modeOf, repStep, rerampWarmups, isBw, isPerSide, entryExcluded, entryRoutineId, lastAcrossRoutines } from './history.js'
 import { EXIDX, isAssisted, isLoadedEq, defaultIncrement } from './exercises.js'
-import { isWarmupRow, isSideSet, syncSideAggregate, makeSideSet } from './workout-model.js'
+import { isWarmupRow, isSideSet, syncSideAggregate, makeSideSet, isRestPauseSet, clustersOf } from './workout-model.js'
 import { normalizeRepRange } from './rep-range.js'
 import { isPyramid } from './pyramid.js'
 import { backoffAt } from './backoff.js'
 import { ownedWeightsFor, ownedKindFor, ownedUp, ownedDeload, ownedAround } from './dumbbells.js'
 
-export const POLICIES = ['off', 'linear', 'greyskull', 'double', 'triple', 'time']
+export const POLICIES = ['off', 'linear', 'greyskull', 'double', 'triple', 'er', 'time']
 
 // Which policies can sensibly drive which logging mode.
 export const POLICIES_FOR = {
-  reps: ['off', 'linear', 'greyskull', 'double', 'triple'],
+  reps: ['off', 'linear', 'greyskull', 'double', 'triple', 'er'],
   time: ['off', 'time'],
   cardio: ['off']
 }
@@ -39,6 +39,7 @@ export const POLICY_NAME = {
   greyskull: 'Greyskull LP',
   double: 'Double progression',
   triple: 'Triple progression',
+  er: 'Effective Reps (Density)',
   time: 'Add time'
 }
 export const POLICY_DESC = {
@@ -47,13 +48,14 @@ export const POLICY_DESC = {
   greyskull: 'Two straight sets plus a final set taken to failure. Beat the target on that set and the weight goes up (twice as much if you double the reps). One failure resets 10 %.',
   double: 'Work up through a rep range at the same weight. Reach the top of the range in every set and the weight goes up, reps back to the bottom.',
   triple: 'Reps climb to the top of the range, then a set is added, up to your most sets. All of them at the top and the weight goes up, back to your first sets and reps.',
+  er: 'Accumulate target effective reps in short-rest bursts. Reach target reps in 3 bursts or fewer to advance weight.',
   time: 'Hold every set for the full duration and the target goes up.'
 }
 
 // The Epley target is a soft objective mapped onto the exercise's real load grid. Keep the
 // default out of saved configs so plans written before this policy stays byte-for-byte compatible.
 export const DELOAD_FACTOR = 0.9
-export const DELOAD_AFTER = { linear: 3, greyskull: 1, double: 3, triple: 3, time: 3 }
+export const DELOAD_AFTER = { linear: 3, greyskull: 1, double: 3, triple: 3, er: 3, time: 3 }
 export const DELOAD_FACTOR_MIN = 0.5
 export const DELOAD_FACTOR_MAX = 0.95
 
@@ -223,6 +225,9 @@ export function plannedOf(cfg) {
   if (mode === 'time' && c.sec > 0) out.sec = c.sec
   // Triple progression's set ceiling is part of the plan: raising it changes where a cycle ends.
   if (mode === 'reps' && c.setsMax > 0) out.setsMax = c.setsMax
+  // Effective Reps (density progression) target reps and burst ceiling
+  if (mode === 'reps' && c.erTargetReps > 0) out.erTargetReps = c.erTargetReps
+  if (mode === 'reps' && c.erMaxClusters > 0) out.erMaxClusters = c.erMaxClusters
   if (c.weight != null) out.weight = c.weight
   return out
 }
@@ -233,7 +238,7 @@ export function plannedOf(cfg) {
 // progression leads (issue #232), and from there the work is a plain pull-up or dip.
 const climbsReps = cfg => isBw(cfg) || !isLoadedEq(cfg.id) || isAssisted(cfg)
 
-const PLAN_KEYS = ['sets', 'reps', 'repsMin', 'sec', 'setsMax']
+const PLAN_KEYS = ['sets', 'reps', 'repsMin', 'sec', 'setsMax', 'erTargetReps', 'erMaxClusters']
 const samePlan = (a, b) => PLAN_KEYS.every(k => (a[k] ?? null) === (b[k] ?? null))
 /** Did the routine's sets or reps change since the session that stamped `planned`? */
 export function planChanged(planned, cfg) {
@@ -309,13 +314,51 @@ export function readSession(entry, fallback) {
   const top = step > 0 && sets.length ? Number(sets[0].w) || 0 : 0
   const heavyEnough = (s, k) => !(top > 0) || k === 0 || (Number(s.w) || 0) >= backoffAt(top, k, step) - 0.05
   const reps = sets.map((s, k) => (s.done && heavyEnough(s, k) ? (s.r || 0) : 0))
+
+  // Effective Reps (density progression): evaluate ignition + burst micro-sets
+  const isErPolicy = target.prog === 'er'
+  const rpSet = sets.find(s => isRestPauseSet(s) || clustersOf(s).length > 0) || sets[0]
+  let erTotalReps = 0
+  let erClusterCount = 0
+  let erOk = false
+  const erTargetReps = Math.max(1, Number(target.erTargetReps) || Number(target.intensifier?.totalReps) || (isErPolicy ? 20 : Number(target.reps) || 20))
+  const erMaxClusters = Math.max(1, Number(target.erMaxClusters) || 3)
+
+  if (rpSet) {
+    if (isSideSet(rpSet)) {
+      const leftClusters = (clustersOf(rpSet.sides.L) || []).filter(c => (Number(c?.r) || 0) > 0)
+      const rightClusters = (clustersOf(rpSet.sides.R) || []).filter(c => (Number(c?.r) || 0) > 0)
+      const leftReps = Number(rpSet.sides.L.r) || leftClusters.reduce((sum, c) => sum + (Number(c.r) || 0), 0)
+      const rightReps = Number(rpSet.sides.R.r) || rightClusters.reduce((sum, c) => sum + (Number(c.r) || 0), 0)
+      erTotalReps = leftReps + rightReps
+      erClusterCount = Math.max(leftClusters.length || (leftReps > 0 ? 1 : 0), rightClusters.length || (rightReps > 0 ? 1 : 0))
+      const sideDone = rpSet.sides.L.done && rpSet.sides.R.done
+      const hitSideReps = leftReps >= Math.floor(erTargetReps / 2) && rightReps >= Math.floor(erTargetReps / 2)
+      erOk = sideDone && hitSideReps
+    } else {
+      const clusters = (clustersOf(rpSet) || []).filter(c => (Number(c?.r) || 0) > 0)
+      erTotalReps = Number(rpSet.r) || clusters.reduce((sum, c) => sum + (Number(c.r) || 0), 0)
+      erClusterCount = clusters.length || (erTotalReps > 0 ? 1 : 0)
+      erOk = !!rpSet.done && erTotalReps >= erTargetReps
+    }
+  }
+  const erGraduated = erOk && erClusterCount <= erMaxClusters
+  const standardOk = goal > 0 && enough && reps.length > 0 && reps.every((r, k) => r >= (rowGoals ? rowGoals[k] ?? goal : goal))
+
   return {
     mode, target, goal, reps,
     weight: loadOf(entry, sets),
     count: reps.length,                                   // the dimension bodyweight work grows (#33)
     low: reps.length ? Math.min(...reps) : 0,
     amrap: reps.length ? reps[reps.length - 1] : 0,       // Greyskull's final set
-    ok: goal > 0 && enough && reps.length > 0 && reps.every((r, k) => r >= (rowGoals ? rowGoals[k] ?? goal : goal))
+    ok: isErPolicy ? erOk : standardOk,
+    ...(isErPolicy ? {
+      erTotalReps,
+      erClusterCount,
+      erTargetReps,
+      erMaxClusters,
+      erGraduated
+    } : {})
   }
 }
 
@@ -427,6 +470,15 @@ export function stallCount(sessions, policy) {
       const run = []
       for (let j = i - 1; j >= 0 && sessions[j].weight === sessions[i].weight && sameRows(sessions[j], sessions[i]); j--) run.push(tripleActive(sessions[j]))
       if (run.length && tripleActive(sessions[i]) > Math.max(...run)) break
+    }
+    // Under Effective Reps (density) progression, accumulating more reps at the same weight
+    // is progress towards graduation and resets a stall streak.
+    if (policy === 'er') {
+      const run = []
+      for (let j = i - 1; j >= 0 && sessions[j].weight === sessions[i].weight; j--) {
+        run.push(sessions[j].erTotalReps || 0)
+      }
+      if (run.length && (sessions[i].erTotalReps || 0) > Math.max(...run)) break
     }
     n++ // increment stall count when no escape conditions were met
   }
@@ -720,6 +772,48 @@ export function nextPrescription(S, cfg, routine) {
     }
     const aim = Math.min(top, Math.max(bottom, last.low + repStep(cfg)))
     return { policy, kind: 'hold', weight: w, reps: aim, why: ['Same weight, aim for {0} reps this time.', aim] }
+  }
+
+  if (policy === 'er') {
+    const targetReps = last.erTargetReps || cfg.erTargetReps || cfg.intensifier?.totalReps || 20
+    const maxClusters = last.erMaxClusters || cfg.erMaxClusters || 3
+    const totalReps = last.erTotalReps || 0
+    const clustersCount = last.erClusterCount || 0
+
+    // Graduated: target reps accumulated in <= maxClusters bursts (e.g. <= 3 bursts)
+    if (last.ok && clustersCount <= maxClusters) {
+      if (topped(w)) return toppedOut(w, { reps: targetReps })
+      const up = harder(w, inc)
+      const step = owned ? Math.round((up - w) * 100) / 100 : inc
+      return {
+        policy, kind: 'up', weight: up, reps: targetReps,
+        why: assisted
+          ? ['Accumulated {0} reps in {1} bursts (target: {2} or fewer). {3} {4} less help!', totalReps, clustersCount, maxClusters, step, unit]
+          : ['Accumulated {0} reps in {1} bursts (target: {2} or fewer). Weight goes up by {3} {4}!', totalReps, clustersCount, maxClusters, step, unit]
+      }
+    }
+    // Density challenge: target reps accumulated, but took > maxClusters bursts -> hold weight to condense density
+    if (last.ok && clustersCount > maxClusters) {
+      return {
+        policy, kind: 'hold', weight: w, reps: targetReps,
+        why: ['Accumulated {0} reps in {1} bursts. Condense into {2} bursts or fewer to advance weight.', totalReps, clustersCount, maxClusters]
+      }
+    }
+    // Deload after repeated misses to even accumulate target reps
+    if (stalls >= deloadAt) {
+      const dw = easier(w)
+      return {
+        policy, kind: 'deload', weight: dw, reps: targetReps,
+        why: assisted
+          ? ['Short of {0} reps {1} sessions running. Back to {2} {3} of help and build up again.', targetReps, stalls, dw, unit]
+          : ['Short of {0} reps {1} sessions running. Reset to {2} {3} and build up again.', targetReps, stalls, dw, unit]
+      }
+    }
+    // Missed target reps, same weight again
+    return {
+      policy, kind: 'hold', weight: w, reps: targetReps,
+      why: ['Accumulated {0} of {1} reps. Same weight again ({2} of {3} to go).', totalReps, targetReps, deloadAt - stalls, deloadAt]
+    }
   }
 
   // linear + greyskull
